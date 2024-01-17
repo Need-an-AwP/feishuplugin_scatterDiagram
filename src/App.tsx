@@ -10,6 +10,8 @@ import type { RadioChangeEvent } from 'antd';
 import html2canvas from 'html2canvas';
 import { float } from 'html2canvas/dist/types/css/property-descriptors/float';
 import { kmeans } from 'ml-kmeans';
+import { DBSCAN } from 'density-clustering';
+import { isString } from 'antd/es/button';
 
 
 export default function App() {
@@ -20,8 +22,10 @@ export default function App() {
     const [loadings, setLoadings] = useState<boolean>(false);
     const [percent, setPercent] = useState<number>(0);
     const isNextButtonDisabled = !(selectedValues[0]);
+    const [regressionSelect, setregressionSelect] = useState('none');
     const [clusteringSelect, setclusteringSelect] = useState('none');
     const [kmeansParams, setkmeansParams] = useState([3, 100]);
+    const [dbscanParams, setdbscanParams] = useState([5, 2])
 
     useEffect(() => {
         const fetchData = async () => {
@@ -56,7 +60,6 @@ export default function App() {
         if (oldChart) {
             oldChart.destroy();
         }
-
 
         /*
         views: [
@@ -98,6 +101,7 @@ export default function App() {
                         xField: xField,
                         yField: yField,
                         colorField: 'cluster',
+                        regressionLine: { type: 'log' },
                     },
                 },
 
@@ -113,6 +117,10 @@ export default function App() {
         setSelectedValues(newSelectedValues);
     };
 
+    const handleRegressionSelect = (value: string | undefined) => {
+        setregressionSelect(value);
+    };
+
     const handleclusteringSelect = (value: string | undefined) => {
         setclusteringSelect(value);
     };
@@ -121,6 +129,12 @@ export default function App() {
         const newKP = [...kmeansParams];
         newKP[index] = value;
         setkmeansParams(newKP);
+    };
+
+    const handledbscanParams = (index: number, value: number) => {
+        const newDP = [...dbscanParams];
+        newDP[index] = value;
+        setdbscanParams(newDP);
     };
 
     const renderClusteringOptions = () => {
@@ -163,12 +177,34 @@ export default function App() {
                         </Row>
                     </>
                 );
+
             case 'dbscan':
                 return (
-                    <div>
-                        <span>dbscan params</span>
-                    </div>
+                    <>
+                        <Row gutter={16}>
+                            <Col span={12}>邻域半径</Col>
+                            <Col span={12}>
+                                <InputNumber
+                                    min={1}
+                                    size='small'
+                                    defaultValue={5}
+                                    onChange={(value) => handledbscanParams(0, value)}
+                                />
+                            </Col>
+                        </Row>
+                        <Row gutter={16} >
+                            <Col span={12}>最小点数</Col>
+                            <Col span={12}>
+                                <InputNumber
+                                    size='small'
+                                    defaultValue={2}
+                                    onChange={(value) => handledbscanParams(1, value)}
+                                />
+                            </Col>
+                        </Row>
+                    </>
                 );
+
             default:
                 return null;
         }
@@ -199,28 +235,38 @@ export default function App() {
                 recordData[o?.name] = cv;
             }
             origin_data.push(recordData);
-            console.log((recordIdList.indexOf(i) + 1) / recordIdList.length * 100)
-            //console.log(recordIdList.length * 100)
             setPercent(parseFloat(((recordIdList.indexOf(i) + 1) / recordIdList.length * 100).toFixed(1)))
+            //console.log(parseFloat(((recordIdList.indexOf(i) + 1) / recordIdList.length * 100).toFixed(1)))
         }
 
         origin_data.map((item, index) => {
-            item['index'] = index + 1;
             for (let key in item) {
-                if (!isNaN(parseFloat(item[key]))) { item[key] = parseFloat(item[key]) }
+                if (!isNaN(parseFloat(item[key])) && !item[key].includes('-')) {
+                    item[key] = parseFloat(item[key])
+                }
             }
+            item['index'] = index + 1;
         })
         const data = origin_data;
         const xField = selectedValues[1];
         const yField = selectedValues[0];
         // kmeans clustering
         if (clusteringSelect == 'kmeans') {
-            const loc_data = [];
-            for (let i of data) {
-                let a = [];
-                a.push(i[xField]);
-                a.push(i[yField]);
-                loc_data.push(a);
+            let loc_data = [];
+            if (isString(data[0][xField])) {
+                for (let i of data) {
+                    let a = [];
+                    a.push(i['index']);
+                    a.push(i[yField]);
+                    loc_data.push(a);
+                }
+            } else {
+                for (let i of data) {
+                    let a = [];
+                    a.push(i[xField]);
+                    a.push(i[yField]);
+                    loc_data.push(a);
+                }
             }
             const { clusters, centroids } = kmeans(
                 loc_data,
@@ -231,6 +277,38 @@ export default function App() {
                 data[i].cluster = clusters[i];
             }
 
+        }
+        //DBSCAN clustering
+        if (clusteringSelect == 'dbscan') {
+            let loc_data = [];
+            if (isString(data[0][xField])) {
+                for (let i of data) {
+                    let a = [];
+                    a.push(i['index']);
+                    a.push(i[yField]);
+                    loc_data.push(a);
+                }
+            } else {
+                for (let i of data) {
+                    let a = [];
+                    a.push(i[xField]);
+                    a.push(i[yField]);
+                    loc_data.push(a);
+                }
+            }
+            loc_data = loc_data.map(point => point.map(value => Number.isFinite(value) ? value : 0));
+            let dbscan = new DBSCAN;
+            const clusters = dbscan.run(loc_data, dbscanParams[0], dbscanParams[1]);
+
+            let pointToCluster = [];
+            clusters.forEach((cluster, index) => {
+                cluster.forEach(pointIndex => {
+                    pointToCluster[pointIndex] = index;
+                });
+            });
+            for (let i = 0; i < data.length; i++) {
+                data[i].cluster = pointToCluster[i];
+            }
         }
 
 
@@ -272,6 +350,22 @@ export default function App() {
             </Space>
             <Divider />
             <Space wrap style={{ width: '100%', marginBottom: '20px' }} direction="horizontal">
+                <span style={{ fontSize: '15px', marginRight: '15px' }}>绘制回归线</span>
+                <Select
+                    style={{ width: 150, marginRight: '10px' }}
+                    options={[
+                        { label: '无', value: 'none' },
+                        { label: '线性', value: 'linear' },
+                        { label: '指数', value: 'exp' },
+                        { label: '局部加权', value: 'loess' },
+                        { label: '对数', value: 'log' },
+                        { label: '多项式', value: 'poly' },
+                        { label: '幂函数', value: 'pow' },
+                        { label: '二次多项式', value: 'quad' },
+                    ]}
+                    onChange={(value) => handleRegressionSelect(value)}
+                    defaultValue='none'
+                />
                 <span style={{ fontSize: '15px' }}>选择聚类算法</span>
                 <Select
                     style={{ width: 150, marginRight: '10px' }}
@@ -296,8 +390,9 @@ export default function App() {
             >
                 下一步
             </Button>
+
             {percent > 0 && percent < 100 && (
-                <Progress status="active" percent={percent} />
+                <Progress percent={percent} strokeColor={{ '0%': '#108ee9', '100%': '#87d068' }} />
             )}
 
             <Button
